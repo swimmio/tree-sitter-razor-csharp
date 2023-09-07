@@ -32,6 +32,7 @@ const stringEncoding = /(u|U)8/;
 module.exports = grammar({
   name: 'c_sharp',
 
+  // TODO: C# comments and preprocessors should not be in html content
   extras: $ => [
     $.comment,
     /[\s\u00A0\uFEFF\u3000]+/,
@@ -123,6 +124,13 @@ module.exports = grammar({
   word: $ => $._identifier_token,
 
   rules: {
+    // cshtml: $ => prec.right(repeat(choice($._razor_annotation, $.content))),
+    cshtml: $ => prec.right(seq(
+      repeat(seq(optional($.content), $._razor_annotation)),
+      optional($.content),
+    )),
+
+    // TODO: delete this?
     compilation_unit: $ => seq(
       repeat($.extern_alias_directive),
       repeat($.using_directive),
@@ -868,6 +876,8 @@ module.exports = grammar({
       $.using_statement,
       $.while_statement,
       $.yield_statement,
+      $.implicit_html,
+      $.explicit_line_html,
     ),
 
     break_statement: $ => seq('break', ';'),
@@ -1964,6 +1974,173 @@ module.exports = grammar({
         ))
       }));
     },
+
+    content: $ => prec.left(repeat1(choice(
+      // this makes it LR(2) I think?
+      // is trailing whitespace here needed?
+      prec(1, /\w@[\w\s]/),
+      alias($.comment, 'notcomment'),
+      /[^@+]/,
+      '@@',
+    ))),
+
+    _razor_annotation: $ => seq('@', choice(
+      $.implicit_expr,
+      $.explicit_expr,
+      $._code_block,
+    )),
+
+    // TODO: actually parse implicit_expr
+    implicit_expr: $ => choice(
+      seq('await', $._non_await_implicit_expr),
+      $._non_await_implicit_expr,
+    ),
+
+    _non_await_implicit_expr: _ => /\w[^\s<>]*/,
+
+    explicit_expr: $ => seq('(', $._expression, ')'),
+
+    _code_block: $ => choice(
+      $.code_block,
+      $._razor_directive,
+      $._razor_conditionals,
+      $._razor_loop,
+      $.razor_using,
+      $.try_statement,
+      $.lock_statement,
+    ),
+
+    code_block: $ => seq('{', repeat($._statement), '}'),
+
+    _razor_directive: $ => choice(
+      $.attribute_directive,
+      $.code_directive,
+      $.functions_directive,
+      $.implements_directive,
+      $.inherits_directive,
+      $.inject_directive,
+      $.layout_directive,
+      $.model_directive,
+      $.namespace_directive,
+      $.page_directive,
+      $.preservewhitespace_directive,
+      $.section,
+    ),
+
+    // idk if it's really _expression here
+    attribute_directive: $ => seq('attribute', '[', $._expression, ']'),
+
+    code_directive: $ => seq('code', $.declaration_list),
+    functions_directive: $ => seq('functions', $.declaration_list),
+
+    type_name: $ => $._type_name,
+    implements_directive: $ => seq('implements', $.type_name, '\n'),
+    inherits_directive: $ => seq('inherits', $.type_name, '\n'),
+
+    inject_directive: $ => seq('inject', $.type_name, $.identifier, '\n'),
+
+    // only available for razor components (.razor)
+    layout_directive: $ => seq('layout', $.identifier, '\n'),
+
+    // MVC and razor pages only (.cshtml)
+    model_directive: $ => seq('model', $.identifier, '\n'),
+
+    namespace_directive: $ => seq('namespace', field('name', $._name), '\n'),
+
+    page_directive: $ => seq('page', optional($.string_literal), '\n'),
+
+    preservewhitespace_directive: $ => seq('preservewhitespace', $.boolean_literal, '\n'),
+
+    section: $ => seq('section', field('name', $.identifier), $.block),
+
+    // TODO: better parsing
+    implicit_html: _ => /<.*>/,
+
+    // same as cshtml except non-empty
+    _cshtml1: $ => prec.right(seq(
+      repeat1(seq(optional($.content), $._razor_annotation)),
+      optional($.content),
+    )),
+
+    // TODO: parse html element + interweaved razor expressions @DoSomething()
+    explicit_line_html: $ => seq('@:', $._cshtml1, '\n'),
+
+    _razor_conditionals: $ => choice(
+      $.razor_if,
+      $.switch_statement,
+    ),
+
+    razor_if: $ => prec.right(seq(
+      'if',
+      '(',
+      field('condition', $._expression),
+      ')',
+      field('consequence', $.block),
+      optional(seq(
+        optional('@'),
+        'else',
+        field('alternative', choice($.razor_if, $.block)),
+      )),
+    )),
+
+    _razor_loop: $ => choice(
+      $.for_statement,
+      $.razor_for_each, // TODO: inconsistent name
+      $.while_statement,
+      $.do_statement,
+    ),
+
+    // for_each_statement includes optional "await"
+    razor_for_each: $=> seq(
+      'foreach',
+      '(',
+      choice(
+        seq(
+          field('type', $._type),
+          field('left', choice($.identifier, $.tuple_pattern)),
+        ), // for_each_statement
+        field('left', $._expression), // for_each_variable_statement
+      ),
+      'in',
+      field('right', $._expression),
+      ')',
+      field('body', $.block)
+    ),
+
+    razor_using: $ => seq(
+      'using',
+      '(',
+      choice($.variable_declaration, $._expression),
+      ')',
+      field('body', $._statement)
+    ),
+
+    // not used right now, keeping for documentation
+    _razor_keyword: _ => choice(
+      'page',
+      'namespace',
+      'inherits',
+      'model',
+      'section',
+      'helper',
+    ),
+
+    _csharp_razor_keywords: _ => choice(
+      'case',
+      'do',
+      'default',
+      'for',
+      'foreach',
+      'if',
+      'else',
+      'lock',
+      'switch',
+      'try',
+      'catch',
+      'finally',
+      'using',
+      'while',
+    ),
   }
 })
 
