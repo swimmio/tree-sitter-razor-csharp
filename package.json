@@ -1,5 +1,5 @@
 {
-  "name": "tree-sitter-razor-csharp",
+  "name": "@swimmio/tree-sitter-razor-csharp",
   "version": "0.20.0",
   "description": "C# Razor grammar for tree-sitter",
   "main": "bindings/node",
